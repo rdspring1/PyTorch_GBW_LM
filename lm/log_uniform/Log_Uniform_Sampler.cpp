@@ -14,6 +14,11 @@ Log_Uniform_Sampler::Log_Uniform_Sampler(const int range_max) : N(range_max), di
 	}
 }
 
+float Log_Uniform_Sampler::probability(const int idx)
+{
+	return prob[idx];
+}
+
 std::vector<float> Log_Uniform_Sampler::expected_count(const int num_tries, std::vector<long> samples)
 {
 	std::vector<float> freq;
@@ -30,6 +35,7 @@ std::unordered_set<long> Log_Uniform_Sampler::sample(const size_t size, int* num
 	std::unordered_set<long> data;
 	const double log_N = log(N);
 
+	*num_tries = 0;
 	while(data.size() != size)
 	{
 		*num_tries += 1;

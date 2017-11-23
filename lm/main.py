@@ -11,6 +11,7 @@ import torch.optim as optim
 from torch.autograd import Variable
 from torch.utils.serialization import load_lua
 
+#from stream_gbw import Vocabulary, StreamGBWDataset
 from gbw import GBWDataset
 from fast_gbw import FastGBWDataset
 import model
@@ -19,17 +20,17 @@ import util
 parser = argparse.ArgumentParser(description='PyTorch LSTM Language Model')
 parser.add_argument('--data', type=str, default='../data/gbw',
                     help='location of the data corpus')
-parser.add_argument('--emsize', type=int, default=512,
+parser.add_argument('--emsize', type=int, default=256,
                     help='size of word embeddings')
-parser.add_argument('--nhid', type=int, default=512,
+parser.add_argument('--nhid', type=int, default=256,
                     help='number of hidden units per layer')
-parser.add_argument('--nlayers', type=int, default=4,
+parser.add_argument('--nlayers', type=int, default=2,
                     help='number of layers')
-parser.add_argument('--lr', type=float, default=1e-2,
+parser.add_argument('--lr', type=float, default=1e-1,
                     help='initial learning rate')
-parser.add_argument('--clip', type=float, default=1.0,
+parser.add_argument('--clip', type=float, default=10.0,
                     help='gradient clipping')
-parser.add_argument('--epochs', type=int, default=10,
+parser.add_argument('--epochs', type=int, default=1,
                     help='upper epoch limit')
 parser.add_argument('--batch_size', type=int, default=128, metavar='N',
                     help='batch size')
@@ -41,8 +42,6 @@ parser.add_argument('--tied', action='store_true',
                     help='tie the word embedding and softmax weights')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
-parser.add_argument('--cuda', action='store_true',
-                    help='use CUDA')
 parser.add_argument('--save', type=str,  default='model.pt',
                     help='path to save the final model')
 args = parser.parse_args()
@@ -55,6 +54,7 @@ torch.cuda.manual_seed(args.seed)
 # Load data
 ###############################################################################
 
+# Torch
 word_freq = load_lua(os.path.join(args.data, 'word_freq.th7')).numpy()
 mapto = torch.from_numpy(util.reverse(np.argsort(-word_freq))).long()
 print("load word frequency mapping - complete")
@@ -68,6 +68,18 @@ print("load train data - complete")
 test_corpus = GBWDataset(args.data, 'test_data.th7', mapto)
 print("load test data - complete")
 
+# Streaming
+'''
+vocabulary = Vocabulary.from_file(os.path.join(args.data, "1b_word_vocab.txt"))
+
+ntokens = len(vocabulary)
+nsampled = 8192
+
+train_corpus = StreamGBWDataset(vocabulary, os.path.join(args.data, "training-monolingual.tokenized.shuffled/*"))
+test_corpus = StreamGBWDataset(vocabulary, os.path.join(args.data, "heldout-monolingual.tokenized.shuffled/*"), deterministic=True)
+print("load dataset - complete")
+'''
+
 ###############################################################################
 # Build the model
 ###############################################################################
@@ -75,7 +87,7 @@ eval_batch_size = 1
 net = model.RNNModel(ntokens, args.emsize, args.nhid, args.nlayers, args.dropout)
 
 encoder = nn.Embedding(ntokens, args.emsize)
-util.init_weights(encoder, ntokens)
+util.initialize(encoder, ntokens)
 
 twht = None
 if args.tied:
@@ -83,7 +95,7 @@ if args.tied:
         raise ValueError('When using the tied flag, hidden must be equal to embedding size')
     twht = encoder.weight
 
-ss = model.SampledSoftmax(args.batch_size, args.bptt, ntokens, nsampled, args.nhid, p=None, freq=None, tied_weight=twht)
+ss = model.SampledSoftmax(ntokens, nsampled, args.nhid, tied_weight=twht)
 
 net.add_module("encoder", encoder)
 net.add_module("decoder", ss)
@@ -161,7 +173,7 @@ def train():
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm(net.parameters(), args.clip)
+        torch.nn.utils.clip_grad_norm(net.rnn.parameters(), args.clip)
         optimizer.step()
 
         total_loss += word_cnt * loss.data

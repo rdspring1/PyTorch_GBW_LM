@@ -7,7 +7,7 @@ PyTorch Implementation of Google Billion Word Language Model
 * Implemented [Sampled Softmax](https://www.tensorflow.org/api_docs/python/tf/nn/sampled_softmax_loss) and 
 [Log-Uniform Sampler](https://www.tensorflow.org/api_docs/cc/class/tensorflow/ops/log-uniform-candidate-sampler)
 
-# Hyper-Parameters
+# Baseline Hyper-Parameters
 | Parameter             | Value         |
 | --------------------- | :----------:  |
 | # Epochs              | 10            |
@@ -23,10 +23,17 @@ PyTorch Implementation of Google Billion Word Language Model
 | Gradient Clipping     | 1.0           |
 | Dropout               | 0.10          |
 
+# Updated Hyper-Parameters [1]
+| Parameter                             | Value         |
+| ------------------------------------- | :----------:  |
+| Optimizer                             | AdaGrad       |
+| Learning Rate                         | 0.1           |
+| Gradient Clipping - LSTM Layers Only  | 10.0          |
+
 I tied the word embedding and softmax weight matrices together to save GPU memory.
 * [Tying Word Vectors and Word Classifiers: A Loss Framework for Language Modeling](https://arxiv.org/pdf/1611.01462.pdf)
 
-# Setup
+# Setup - Torch Data Format
 1. Download Google Billion Word Dataset for Torch - [Link](http://lisaweb.iro.umontreal.ca/transfert/lisa/users/leonardn/billionwords.tar.gz)
 2. Run "process_gbw.py" on the "train_data.th7" file to create the "train_data.sid" file
 3. Install Cython framework and build Log_Uniform Sampler
@@ -37,6 +44,12 @@ The preprocessing step and "train_data.sid" file speeds up loading the massive t
 
 * Data Tensors - (test_data, valid_data, train_data, train_small, train_tiny) - (#words x 2) matrix - (sentence id, word id)
 * Sentence ID Tensor - (#sentences x 3) matrix - (start position, end position, sentence length)
+
+# Setup - Original Data Format
+1. Download Google Billion Word Dataset - [Link](http://www.statmt.org/lm-benchmark/1-billion-word-language-modeling-benchmark-r13output.tar.gz)
+
+The Torch Data Format loads the entire dataset at once, so it requires at least 32 GB of memory.
+The original format partitions the dataset into smaller chunks, but it runs slower.
 
 # Resources
 1. [Exploring the Limits of Language Modeling](https://arxiv.org/abs/1602.02410) [Github](https://github.com/rafaljozefowicz/lm)

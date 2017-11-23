@@ -9,6 +9,7 @@ cdef extern from "Log_Uniform_Sampler.h":
         Log_Uniform_Sampler(int) except +
         vector[float] expected_count(int, vector[long]) except +
         unordered_set[long] sample(int, int*) except +
+        float probability(int) except +
 
 cdef class LogUniformSampler:
     cdef Log_Uniform_Sampler* c_sampler
@@ -25,3 +26,6 @@ cdef class LogUniformSampler:
         true_freq = self.c_sampler.expected_count(num_tries, labels.tolist())
         sample_freq = self.c_sampler.expected_count(num_tries, samples)
         return samples, true_freq, sample_freq
+
+    def probability(self, idx):
+        return self.c_sampler.probability(idx)

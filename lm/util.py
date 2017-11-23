@@ -5,7 +5,7 @@ import torch
 from torch.utils.serialization import load_lua
 import numpy as np
 
-def init_weights(param, size, alpha=0.8):
+def initialize(param, size, alpha=0.8):
     stdv = math.sqrt(1. / size)
     param.weight.data.uniform_(-stdv * alpha, stdv * alpha)
 

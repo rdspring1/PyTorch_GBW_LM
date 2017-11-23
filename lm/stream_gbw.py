@@ -1,0 +1,137 @@
+import codecs
+import glob
+import json
+import random
+
+import numpy as np
+import torch
+
+class Vocabulary(object):
+
+    def __init__(self):
+        self._token_to_id = {}
+        self._token_to_count = {}
+        self._id_to_token = []
+        self._num_tokens = 0
+        self._s_id = None
+        self._unk_id = None
+
+    @property
+    def num_tokens(self):
+        return self._num_tokens
+
+    @property
+    def unk(self):
+        return "<UNK>"
+
+    @property
+    def unk_id(self):
+        return self._unk_id
+
+    @property
+    def s(self):
+        return "<S>"
+
+    @property
+    def s_id(self):
+        return self._s_id
+
+    def __len__(self):
+        return self._num_tokens
+
+    def add(self, token, count):
+        self._token_to_id[token] = self._num_tokens
+        self._token_to_count[token] = count
+        self._id_to_token.append(token)
+        self._num_tokens += 1
+
+    def finalize(self):
+        self._s_id = self.get_id(self.s)
+        self._unk_id = self.get_id(self.unk)
+
+    def get_id(self, token):
+        return self._token_to_id.get(token, self.unk_id)
+
+    def get_token(self, id_):
+        return self._id_to_token[id_]
+
+    def from_file(filename):
+        vocab = Vocabulary()
+        with codecs.open(filename, "r", "utf-8") as f:
+            for line in f:
+                word, count = line.strip().split()
+                vocab.add(word, int(count))
+        vocab.finalize()
+        return vocab
+
+class StreamGBWDataset(object):
+
+    def __init__(self, vocab, file_pattern, deterministic=False):
+        self._vocab = vocab
+        self._file_pattern = file_pattern
+        self._deterministic = deterministic
+
+    def _parse_sentence(self, line):
+        s_id = self._vocab.s_id
+        return [s_id] + [self._vocab.get_id(word) for word in line.strip().split()] + [s_id]
+
+    def _parse_file(self, file_name):
+        print("Processing file: %s" % file_name)
+
+        with codecs.open(file_name, "r", "utf-8") as f:
+            lines = [line.strip() for line in f]
+
+            if not self._deterministic:
+                random.shuffle(lines)
+            print("Finished processing!")
+
+            for line in lines:
+                yield self._parse_sentence(line)
+
+    def _sentence_stream(self, file_stream):
+        for file_name in file_stream:
+            for sentence in self._parse_file(file_name):
+                yield sentence
+
+    def _iterate(self, sentences, seq_length, batch_size):
+        streams = [None for idx in range(batch_size)]
+        wrd_cnt = batch_size * seq_length
+
+        x = torch.zeros(seq_length, batch_size).long()
+        y = torch.zeros(seq_length, batch_size).long()
+
+        stop_condition = False
+        while not stop_condition:
+            x.fill_(0)
+            y.fill_(0)
+
+            for idx in range(batch_size):
+                tokens_filled = 0
+                try:
+                    while tokens_filled < seq_length:
+                        if streams[idx] is None or len(streams[idx]) <= 1:
+                            streams[idx] = next(sentences)
+
+                        num_tokens = min(len(streams[idx]) - 1, seq_length - tokens_filled)
+                        x[tokens_filled:tokens_filled + num_tokens, idx] = torch.LongTensor(streams[idx][:num_tokens])
+                        y[tokens_filled:tokens_filled + num_tokens, idx] = torch.LongTensor(streams[idx][1:num_tokens+1])
+
+                        streams[idx] = streams[idx][num_tokens:]
+                        tokens_filled += num_tokens
+                except StopIteration:
+                    stop_condition = True
+
+            yield (x, y, wrd_cnt)
+
+    def batch_generator(self, seq_length, batch_size):
+        def file_stream():
+            file_patterns = glob.glob(self._file_pattern)
+
+            if not self._deterministic:
+                random.shuffle(file_patterns)
+
+            for file_name in file_patterns:
+                yield file_name
+
+        for value in self._iterate(self._sentence_stream(file_stream()), seq_length, batch_size):
+            yield value
