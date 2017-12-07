@@ -91,11 +91,11 @@ class FastGBWDataset(Dataset):
 
     def add(self, seq_length, source, target, batch_idx, tracker):
         seq_id, seq_pos = tracker
-        start_idx, end_idx, length = self.sentence_id[seq_id]
+        start_idx, length = self.sentence_id[seq_id]
 
         # Bounds-Check
         if seq_id >= 0:
-            start_idx, end_idx, length = self.sentence_id[seq_id]
+            start_idx, length = self.sentence_id[seq_id]
 
         curr = 0 
         while curr != seq_length:
@@ -110,7 +110,7 @@ class FastGBWDataset(Dataset):
                    self.pos += 1
                #seq_id = 0 if (seq_id+1) == self.length else (seq_id+1)
                seq_pos = 0
-               start_idx, end_idx, length = self.sentence_id[seq_id]
+               start_idx, length = self.sentence_id[seq_id]
 
             seq_remaining = length - 1 - seq_pos
             batch_remaining = seq_length - curr

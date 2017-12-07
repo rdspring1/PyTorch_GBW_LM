@@ -18,13 +18,15 @@ import model
 import util
 
 parser = argparse.ArgumentParser(description='PyTorch LSTM Language Model')
-parser.add_argument('--data', type=str, default='../data/gbw',
+parser.add_argument('--data', type=str, default='../data/gbw1',
                     help='location of the data corpus')
 parser.add_argument('--emsize', type=int, default=256,
                     help='size of word embeddings')
-parser.add_argument('--nhid', type=int, default=256,
+parser.add_argument('--proj', type=bool, default=True,
+                    help='use linear projection layer to map LSTM to word embeddings')
+parser.add_argument('--nhid', type=int, default=1024,
                     help='number of hidden units per layer')
-parser.add_argument('--nlayers', type=int, default=2,
+parser.add_argument('--nlayers', type=int, default=1,
                     help='number of layers')
 parser.add_argument('--lr', type=float, default=1e-1,
                     help='initial learning rate')
@@ -91,20 +93,24 @@ util.initialize(encoder, ntokens)
 
 twht = None
 if args.tied:
-    if args.nhid != args.emsize:
+    if args.nhid != args.emsize and not args.proj:
         raise ValueError('When using the tied flag, hidden must be equal to embedding size')
     twht = encoder.weight
 
-ss = model.SampledSoftmax(ntokens, nsampled, args.nhid, tied_weight=twht)
+D = args.emsize if args.proj else args.nhid
+ss = model.SampledSoftmax(ntokens, nsampled, D, tied_weight=twht)
+
+if args.proj:
+    proj = nn.Linear(args.nhid, args.emsize)
+    util.initialize_fc(proj)
+    net.add_module("proj", proj)
 
 net.add_module("encoder", encoder)
 net.add_module("decoder", ss)
-
-net.cuda(0)
-encoder.cuda(0)
-ss.cuda(0)
+net.cuda()
 
 criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adagrad(net.parameters(), args.lr)
 
 ###############################################################################
 # Training code
@@ -135,6 +141,8 @@ def evaluate(data_source, data_gen):
 
         emb = encoder(data)
         output, hidden = net(emb, hidden)
+        if args.proj:
+           output = proj(output)
         logits, new_targets = ss(output, targets)
 
         logits_flat = logits.view(-1, ntokens)
@@ -147,8 +155,6 @@ def train():
     net.train()
 
     train_loader = train_corpus.batch_generator(seq_length=args.bptt, batch_size=args.batch_size)
-    optimizer = optim.Adagrad(net.parameters(), args.lr)
-
     total_loss = 0
     total_word_count = 0
 
@@ -167,6 +173,8 @@ def train():
         # embedding, softmax => GPU 1
         emb = encoder(data)
         output, hidden = net(emb, hidden)
+        if args.proj:
+           output = proj(output)
         logits, new_targets = ss(output, targets, True)
 
         loss = criterion(logits.view(-1, nsampled+1), new_targets)
