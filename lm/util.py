@@ -5,15 +5,10 @@ import torch
 from torch.utils.serialization import load_lua
 import numpy as np
 
-def initialize(param, size, alpha=0.8):
-    stdv = math.sqrt(1. / size)
-    param.weight.data.uniform_(-stdv * alpha, stdv * alpha)
-
-def initialize_fc(fc):
-    in_, out_ = fc.weight.size()
-    stdv = math.sqrt(2. / (in_ + out_))
-    fc.weight.data.normal_(0, stdv)
-    fc.bias.data.fill_(0)
+def initialize(matrix):
+    in_, out_ = matrix.size()
+    stdv = math.sqrt(3. / (in_ + out_))
+    matrix.data.uniform_(-stdv, stdv)
 
 def log_uniform(class_id, range_max):
     return (math.log(class_id+2) - math.log(class_id+1)) / math.log(range_max+1)

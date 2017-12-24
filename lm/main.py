@@ -18,27 +18,27 @@ import model
 import util
 
 parser = argparse.ArgumentParser(description='PyTorch LSTM Language Model')
-parser.add_argument('--data', type=str, default='../data/gbw1',
+parser.add_argument('--data', type=str, default='../data/gbw',
                     help='location of the data corpus')
 parser.add_argument('--emsize', type=int, default=256,
                     help='size of word embeddings')
 parser.add_argument('--proj', type=bool, default=True,
                     help='use linear projection layer to map LSTM to word embeddings')
-parser.add_argument('--nhid', type=int, default=1024,
+parser.add_argument('--nhid', type=int, default=2048,
                     help='number of hidden units per layer')
 parser.add_argument('--nlayers', type=int, default=1,
                     help='number of layers')
 parser.add_argument('--lr', type=float, default=1e-1,
                     help='initial learning rate')
-parser.add_argument('--clip', type=float, default=10.0,
+parser.add_argument('--clip', type=float, default=1.0,
                     help='gradient clipping')
-parser.add_argument('--epochs', type=int, default=1,
+parser.add_argument('--epochs', type=int, default=5,
                     help='upper epoch limit')
 parser.add_argument('--batch_size', type=int, default=128, metavar='N',
                     help='batch size')
 parser.add_argument('--bptt', type=int, default=20,
                     help='sequence length')
-parser.add_argument('--dropout', type=float, default=0.10,
+parser.add_argument('--dropout', type=float, default=0.01,
                     help='dropout applied to layers (0 = no dropout)')
 parser.add_argument('--tied', action='store_true',
                     help='tie the word embedding and softmax weights')
@@ -86,10 +86,10 @@ print("load dataset - complete")
 # Build the model
 ###############################################################################
 eval_batch_size = 1
-net = model.RNNModel(ntokens, args.emsize, args.nhid, args.nlayers, args.dropout)
+net = model.RNNModel(ntokens, args.emsize, args.nhid, args.emsize, args.nlayers, args.proj, args.dropout)
 
 encoder = nn.Embedding(ntokens, args.emsize)
-util.initialize(encoder, ntokens)
+util.initialize(encoder.weight)
 
 twht = None
 if args.tied:
@@ -100,17 +100,12 @@ if args.tied:
 D = args.emsize if args.proj else args.nhid
 ss = model.SampledSoftmax(ntokens, nsampled, D, tied_weight=twht)
 
-if args.proj:
-    proj = nn.Linear(args.nhid, args.emsize)
-    util.initialize_fc(proj)
-    net.add_module("proj", proj)
-
 net.add_module("encoder", encoder)
 net.add_module("decoder", ss)
 net.cuda()
 
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adagrad(net.parameters(), args.lr)
+optimizer = optim.Adagrad(net.parameters(), args.lr, weight_decay=1e-6)
 
 ###############################################################################
 # Training code
@@ -141,8 +136,6 @@ def evaluate(data_source, data_gen):
 
         emb = encoder(data)
         output, hidden = net(emb, hidden)
-        if args.proj:
-           output = proj(output)
         logits, new_targets = ss(output, targets)
 
         logits_flat = logits.view(-1, ntokens)
@@ -151,9 +144,6 @@ def evaluate(data_source, data_gen):
     return total_loss[0] / total_word_count
 
 def train():
-    # Turn on training mode which enables dropout.
-    net.train()
-
     train_loader = train_corpus.batch_generator(seq_length=args.bptt, batch_size=args.batch_size)
     total_loss = 0
     total_word_count = 0
@@ -161,6 +151,7 @@ def train():
     start_time = time.time()
     hidden = net.init_hidden(args.batch_size)
     for batch, item in enumerate(train_loader):
+        net.train()
         data, targets, word_cnt, batch_len = get_batch(item)
 
         # Starting each batch, we detach the hidden state from how it was previously produced.
@@ -173,15 +164,18 @@ def train():
         # embedding, softmax => GPU 1
         emb = encoder(data)
         output, hidden = net(emb, hidden)
-        if args.proj:
-           output = proj(output)
-        logits, new_targets = ss(output, targets, True)
+        logits, new_targets = ss(output, targets)
 
         loss = criterion(logits.view(-1, nsampled+1), new_targets)
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
         torch.nn.utils.clip_grad_norm(net.rnn.parameters(), args.clip)
+        torch.nn.utils.clip_grad_norm(encoder.parameters(), args.clip)
+        torch.nn.utils.clip_grad_norm(ss.parameters(), args.clip)
+        if args.proj:
+            torch.nn.utils.clip_grad_norm(net.proj.parameters(), args.clip)
+
         optimizer.step()
 
         total_loss += word_cnt * loss.data
@@ -189,10 +183,9 @@ def train():
 
         interval = max(10, 1000)
         if (batch % interval) == 0:
-            cur_loss = total_loss[0] / total_word_count
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | loss {:5.2f} | ppl {:8.2f}'
-                  .format(epoch, batch, batch_len, args.lr, elapsed * 1000 / interval, cur_loss, math.exp(cur_loss)))
+                  .format(epoch, batch, batch_len, args.lr, elapsed * 1000 / interval, loss.data[0], math.exp(loss.data[0])))
             start_time = time.time()
             sys.stdout.flush()
 
@@ -201,7 +194,8 @@ try:
     for epoch in range(1, args.epochs+1):
         epoch_start_time = time.time()
         train()
-        test_loader = test_corpus.batch_generator(seq_length=1, batch_size=eval_batch_size, shuffle=False)
+
+        test_loader = test_corpus.batch_generator(seq_length=args.bptt, batch_size=eval_batch_size, shuffle=False)
         val_loss = evaluate(test_corpus, test_loader)
         print('-' * 89)
         print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | valid ppl {:8.2f}'
@@ -214,7 +208,7 @@ except KeyboardInterrupt:
     sys.stdout.flush()
 
 # Run on test data.
-test_loader = test_corpus.batch_generator(seq_length=args.bptt, batch_size=1, shuffle=False)
+test_loader = test_corpus.batch_generator(seq_length=args.bptt, batch_size=eval_batch_size, shuffle=False)
 test_loss = evaluate(test_corpus, test_loader)
 print('=' * 89)
 print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(test_loss, math.exp(test_loss)))

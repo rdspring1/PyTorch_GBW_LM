@@ -1,5 +1,7 @@
 import unittest
+import functools
 import numpy as np
+
 from log_uniform import LogUniformSampler
 
 def EXPECT_NEAR(x, y, epsilon):
@@ -41,6 +43,17 @@ class LogUniformSamplerTestCase(unittest.TestCase):
       for idx in range(N):
         average_count = histogram[idx] / RND
         self.assertTrue(EXPECT_NEAR(expected[idx], average_count, 0.2))
+
+    def test_avoid(self):
+      N = 100
+      nsampled = 98
+      sampler = LogUniformSampler(N)
+      labels = [17, 23]
+      sample_ids = sampler.sample_unique(nsampled, np.asarray(labels, dtype=np.int32))
+
+      total = functools.reduce(lambda x,y: x+y, sample_ids, 0.0)
+      expected_sum = 100 * 99 / 2 - labels[0] - labels[1]
+      self.assertEqual(expected_sum, total)
 
 if __name__ == '__main__':
     unittest.main()

@@ -6,6 +6,7 @@ from torch.autograd import Variable
 import torch.nn as nn
 
 import model
+from log_uniform import LogUniformSampler
 
 def EXPECT_NEAR(x, y, epsilon):
   return np.all(abs(x - y) <= epsilon)
@@ -79,6 +80,39 @@ class ComputeSampledLogitsTest(unittest.TestCase):
     nhid = 10
     labels = [0, 1, 2]
 
+    (weights, biases, hidden_acts, sampled_values, exp_logits, exp_labels) = self._GenerateTestData(
+         num_classes=num_classes,
+         dim=nhid,
+         batch_size=batch_size,
+         num_true=1,
+         labels=labels,
+         sampled=[1, 0, 2, 3],
+		 subtract_log_q=True)
+
+    ss = model.SampledSoftmax(num_classes, nsampled, nhid, tied_weight=None)
+    ss.params.weight.data = torch.from_numpy(weights)
+    ss.params.bias.data = torch.from_numpy(biases)
+    ss.params.cuda()
+
+    hidden_acts = Variable(torch.from_numpy(hidden_acts)).cuda()
+    labels = Variable(torch.LongTensor(labels)).cuda()
+
+    logits, new_targets = ss.sampled(hidden_acts, labels, sampled_values)
+    self.assertTrue(EXPECT_NEAR(exp_logits, logits.data.cpu().numpy(), 1e-4))
+
+    criterion = nn.CrossEntropyLoss()
+    loss = criterion(logits.view(-1, nsampled+1), new_targets)
+    expected_sampled_softmax_loss = np.mean(_SoftmaxCrossEntropyWithLogits(exp_logits, exp_labels))
+    self.assertTrue(EXPECT_NEAR(expected_sampled_softmax_loss, loss.data[0], 1e-4))
+
+  def test_AccidentalMatch(self):
+    np.random.seed(1000)
+    num_classes = 5
+    batch_size = 3
+    nsampled = 4
+    nhid = 10
+    labels = np.random.randint(low=0, high=num_classes, size=batch_size)
+
     (weights, biases, hidden_acts, sampled_vals, exp_logits, exp_labels) = self._GenerateTestData(
          num_classes=num_classes,
          dim=nhid,
@@ -88,21 +122,28 @@ class ComputeSampledLogitsTest(unittest.TestCase):
          sampled=[1, 0, 2, 3],
 		 subtract_log_q=True)
 
-    exp_sampled_softmax_loss = np.mean(_SoftmaxCrossEntropyWithLogits(exp_logits, exp_labels))
     ss = model.SampledSoftmax(num_classes, nsampled, nhid, tied_weight=None)
     ss.params.weight.data = torch.from_numpy(weights)
     ss.params.bias.data = torch.from_numpy(biases)
-
     ss.params.cuda()
+
     hidden_acts = Variable(torch.from_numpy(hidden_acts)).cuda()
     labels = Variable(torch.LongTensor(labels)).cuda()
 
-    logits, new_targets = ss.sampled(hidden_acts, labels, sampled_vals)
-    self.assertTrue(EXPECT_NEAR(exp_logits, logits.data.cpu().numpy(), 1e-4))
+    sampler = LogUniformSampler(nsampled)
+    sampled_values = sampler.sample(nsampled, labels.data.cpu().numpy())
+    sample_ids, true_freq, sample_freq = sampled_values
+    logits, new_targets = ss.sampled(hidden_acts, labels, sampled_values, remove_accidental_match=True)
 
     criterion = nn.CrossEntropyLoss()
     loss = criterion(logits.view(-1, nsampled+1), new_targets)
-    self.assertTrue(EXPECT_NEAR(exp_sampled_softmax_loss, loss.data[0], 1e-4))
+
+    np_logits = logits.data.cpu().numpy()
+    for row in range(batch_size):
+      label = labels[row]
+      for col in range(nsampled):
+        if sample_ids[col] == label:
+          self.assertTrue(EXPECT_NEAR(np.exp(np_logits[row, col+1]), 0, 1e-4))
 
 if __name__ == '__main__':
     unittest.main()
