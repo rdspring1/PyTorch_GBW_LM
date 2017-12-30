@@ -23,7 +23,6 @@ cdef class LogUniformSampler:
         del self.c_sampler
 
     def sample_unique(self, size, labels):
-        cdef int num_tries
         samples = list(self.c_sampler.sample_unique(size, labels))
         return samples
 

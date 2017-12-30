@@ -118,9 +118,9 @@ def repackage_hidden(h, device_id=0):
     else:
         return tuple(repackage_hidden(v) for v in h)
 
-def get_batch(item, device_id=0, evaluation=False):
+def get_batch(item, device_id=0):
     data, target, wrd_cnt, batch_num = item
-    return Variable(data.cuda(device_id), volatile=evaluation), Variable(target.view(-1).cuda(device_id)), wrd_cnt, batch_num
+    return Variable(data.cuda(device_id)), Variable(target.view(-1).cuda(device_id)), wrd_cnt, batch_num
 
 def evaluate(data_source, data_gen):
     # Turn on evaluation mode which disables dropout.
@@ -131,7 +131,7 @@ def evaluate(data_source, data_gen):
 
     hidden = net.init_hidden(eval_batch_size)
     for item in data_gen:
-        data, targets, word_cnt, batch_num = get_batch(item, evaluation=True)
+        data, targets, word_cnt, batch_num = get_batch(item)
         hidden = repackage_hidden(hidden)
 
         emb = encoder(data)
