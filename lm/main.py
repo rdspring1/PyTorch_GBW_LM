@@ -2,6 +2,7 @@ import argparse
 import time
 import math
 import os
+import os.path
 import sys
 import numpy as np
 
@@ -44,7 +45,7 @@ parser.add_argument('--tied', action='store_true',
                     help='tie the word embedding and softmax weights')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
-parser.add_argument('--save', type=str,  default='model.pt',
+parser.add_argument('--save', type=str,  default='gbw_model.pt',
                     help='path to save the final model')
 args = parser.parse_args()
 
@@ -113,10 +114,12 @@ optimizer = optim.Adagrad(net.parameters(), args.lr, weight_decay=1e-6)
 
 def repackage_hidden(h, device_id=0):
     """Wraps hidden states in new Variables, to detach them from their history."""
-    if type(h) == Variable:
+    if isinstance(h, Variable):
         return Variable(h.data).cuda(device_id)
+    elif type(h) == tuple:
+        return tuple(repackage_hidden(var) for var in h)
     else:
-        return tuple(repackage_hidden(v) for v in h)
+        return [repackage_hidden(state) for state in h]
 
 def get_batch(item, device_id=0):
     data, target, wrd_cnt, batch_num = item
@@ -141,7 +144,7 @@ def evaluate(data_source, data_gen):
         logits_flat = logits.view(-1, ntokens)
         total_loss += word_cnt * criterion(logits_flat, targets).data
         total_word_count += word_cnt
-    return total_loss[0] / total_word_count
+    return total_loss.item() / total_word_count
 
 def train():
     train_loader = train_corpus.batch_generator(seq_length=args.bptt, batch_size=args.batch_size)
@@ -170,11 +173,11 @@ def train():
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm(net.rnn.parameters(), args.clip)
-        torch.nn.utils.clip_grad_norm(encoder.parameters(), args.clip)
-        torch.nn.utils.clip_grad_norm(ss.parameters(), args.clip)
+        torch.nn.utils.clip_grad_norm_(net.rnn.parameters(), args.clip)
+        torch.nn.utils.clip_grad_norm_(encoder.parameters(), args.clip)
+        torch.nn.utils.clip_grad_norm_(ss.parameters(), args.clip)
         if args.proj:
-            torch.nn.utils.clip_grad_norm(net.proj.parameters(), args.clip)
+            torch.nn.utils.clip_grad_norm_(net.proj.parameters(), args.clip)
 
         optimizer.step()
 
@@ -185,15 +188,26 @@ def train():
         if (batch % interval) == 0:
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | loss {:5.2f} | ppl {:8.2f}'
-                  .format(epoch, batch, batch_len, args.lr, elapsed * 1000 / interval, loss.data[0], math.exp(loss.data[0])))
+                  .format(epoch, batch, batch_len, args.lr, elapsed * 1000 / interval, loss.item(), math.exp(loss.item())))
             start_time = time.time()
             sys.stdout.flush()
+
+# Load the saved model.
+if os.path.isfile(args.save):
+    print("Loading Saved Model")
+    with open(args.save, 'rb') as f:
+        net.load_state_dict(torch.load(f))
+        net.rnn.flatten_parameters()
+else:
+    print("Random Initialization - No Saved Model")
 
 # At any point you can hit Ctrl + C to break out of training early.
 try:
     for epoch in range(1, args.epochs+1):
         epoch_start_time = time.time()
         train()
+        with open(args.save, 'wb') as f:
+             torch.save(net.state_dict(), f)
 
         test_loader = test_corpus.batch_generator(seq_length=args.bptt, batch_size=eval_batch_size, shuffle=False)
         val_loss = evaluate(test_corpus, test_loader)

@@ -103,7 +103,7 @@ class ComputeSampledLogitsTest(unittest.TestCase):
     criterion = nn.CrossEntropyLoss()
     loss = criterion(logits.view(-1, nsampled+1), new_targets)
     expected_sampled_softmax_loss = np.mean(_SoftmaxCrossEntropyWithLogits(exp_logits, exp_labels))
-    self.assertTrue(EXPECT_NEAR(expected_sampled_softmax_loss, loss.data[0], 1e-4))
+    self.assertTrue(EXPECT_NEAR(expected_sampled_softmax_loss, loss.item(), 1e-4))
 
   def test_AccidentalMatch(self):
     np.random.seed(1000)

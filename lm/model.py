@@ -43,12 +43,12 @@ class SampledSoftmax(nn.Module):
         sample_freq = Variable(torch.FloatTensor(sample_freq)).cuda(device_id)
 
         # gather true labels - weights and frequencies
-        true_weights = self.params.weight[labels, :]
-        true_bias = self.params.bias[labels]
+        true_weights = torch.index_select(self.params.weight, 0, labels)
+        true_bias = torch.index_select(self.params.bias, 0, labels)
 
         # gather sample ids - weights and frequencies
-        sample_weights = self.params.weight[sample_ids, :]
-        sample_bias = self.params.bias[sample_ids]
+        sample_weights = torch.index_select(self.params.weight, 0, sample_ids)
+        sample_bias = torch.index_select(self.params.bias, 0, sample_ids)
 
         # calculate logits
         true_logits = torch.sum(torch.mul(inputs, true_weights), dim=1) + true_bias
