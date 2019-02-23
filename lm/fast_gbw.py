@@ -5,19 +5,20 @@ import numpy as np
 
 import torch
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.serialization import load_lua
 
 class FastGBWDataset(Dataset):
     """Preprocessed Google 1-Billion Word dataset."""
 
-    def __init__(self, path, name, sid, mapto):
+    def __init__(self, path, name, sid, mapto, seq_length, batch_size):
         """
         Args:
             path (string): path to data file
             name (string): file name
             sid (string): file name - sentence id
+            seq_length: length of sequence
+            batch_size: number of examples
         """
-        dataset = util.load_lua_tensor(os.path.join(path, name))
+        dataset = torch.load(os.path.join(path, name))
         self.corpus = mapto[dataset[:, 1]-1]
         print("loaded tensor", self.corpus.size())
 
@@ -28,8 +29,14 @@ class FastGBWDataset(Dataset):
         self.length, dim = self.sentence_id.shape
         print("#sentences", self.length)
 
+        self.seq_length = seq_length
+        self.batch_size = batch_size
+        self.wrd_cnt = self.batch_size * self.seq_length
+        batch_len = self.num_words // self.batch_size
+        self.batch_num = (batch_len - 1) // self.seq_length
+
     def build(filepath):
-        tensor = load_lua(filepath)
+        tensor = torch.load(filepath)
         vocab = dict()
         for idx, value in enumerate(tensor):
             vocab[value] = idx
@@ -38,7 +45,7 @@ class FastGBWDataset(Dataset):
         unk_id = vocab["<UNK>"]
         return vocab, start_id, end_id, unk_id
 
-    def batch_generator(self, seq_length, batch_size, shuffle=False):
+    def batch_generator(self, shuffle=False):
         """Generates a random batch for training or validation
 
         Structures each element of the batch as an 'episode'.
@@ -46,8 +53,6 @@ class FastGBWDataset(Dataset):
         episode_width distinct labels.
 
         Args:
-          seq_length: length of sequence
-          batch_size: number of examples
           N: number of rounds
           evaluation: True if testing otherwise False
 
@@ -55,15 +60,11 @@ class FastGBWDataset(Dataset):
           A tuple (x, y) where x is the input tensor (batch_size, sequence_length) 
           and y is the output tensor (batch_size, sequence_length)
         """
-        wrd_cnt = batch_size * seq_length
-        batch_len = self.num_words // batch_size
-        self.batch_num = (batch_len - 1) // seq_length
-
         if self.batch_num == 0:
             raise ValueError("batch_num == 0, decrease batch_size or seq_length")
 
-        source = torch.zeros(seq_length, batch_size).long()
-        target = torch.zeros(seq_length, batch_size).long()
+        source = torch.zeros(self.seq_length, self.batch_size).long()
+        target = torch.zeros(self.seq_length, self.batch_size).long()
 
         if shuffle:
             # sample random set of initial positions for each example in batch
@@ -72,8 +73,8 @@ class FastGBWDataset(Dataset):
             # deterministic ordering
             self.ordering = np.arange(self.length)
 
-        tracker_list = [(self.ordering[seq_idx], 0) for seq_idx in range(batch_size)]
-        self.pos = batch_size
+        tracker_list = [(self.ordering[seq_idx], 0) for seq_idx in range(self.batch_size)]
+        self.pos = self.batch_size
 
         # track current sequence and position
         #initial = random.sample(range(self.length), batch_size)
@@ -86,8 +87,8 @@ class FastGBWDataset(Dataset):
             target.fill_(0)
             for idx, tracker in enumerate(tracker_list):
                 # add sequence to new minibatch
-                tracker_list[idx] = self.add(seq_length, source, target, idx, tracker)
-            yield (source, target, wrd_cnt, self.batch_num)
+                tracker_list[idx] = self.add(self.seq_length, source, target, idx, tracker)
+            yield (source, target, self.wrd_cnt, self.batch_num)
 
     def add(self, seq_length, source, target, batch_idx, tracker):
         seq_id, seq_pos = tracker

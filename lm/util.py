@@ -2,7 +2,6 @@ import math
 import sys
 
 import torch
-from torch.utils.serialization import load_lua
 import numpy as np
 
 def initialize(matrix):
@@ -42,6 +41,3 @@ def reverse(item):
 def load_np(filepath):
     npzfile = np.load(filepath)
     return torch.from_numpy(npzfile['item'])
-
-def load_lua_tensor(filepath):
-    return load_lua(filepath).long()

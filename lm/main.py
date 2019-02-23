@@ -10,13 +10,15 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import Variable
-from torch.utils.serialization import load_lua
 
 #from stream_gbw import Vocabulary, StreamGBWDataset
 from gbw import GBWDataset
 from fast_gbw import FastGBWDataset
-import model
+from sparse_model import RNNModel, SampledSoftmax
 import util
+
+from learning_rate import LinearLR
+from adam_base import Adam
 
 parser = argparse.ArgumentParser(description='PyTorch LSTM Language Model')
 parser.add_argument('--data', type=str, default='../data/gbw',
@@ -29,7 +31,7 @@ parser.add_argument('--nhid', type=int, default=2048,
                     help='number of hidden units per layer')
 parser.add_argument('--nlayers', type=int, default=1,
                     help='number of layers')
-parser.add_argument('--lr', type=float, default=1e-1,
+parser.add_argument('--lr', type=float, default=5e-4,
                     help='initial learning rate')
 parser.add_argument('--clip', type=float, default=1.0,
                     help='gradient clipping')
@@ -37,6 +39,8 @@ parser.add_argument('--epochs', type=int, default=5,
                     help='upper epoch limit')
 parser.add_argument('--batch_size', type=int, default=128, metavar='N',
                     help='batch size')
+parser.add_argument('--scale', type=int, default=8, metavar='N',
+                    help='batch size multiplier')
 parser.add_argument('--bptt', type=int, default=20,
                     help='sequence length')
 parser.add_argument('--dropout', type=float, default=0.01,
@@ -58,17 +62,17 @@ torch.cuda.manual_seed(args.seed)
 ###############################################################################
 
 # Torch
-word_freq = load_lua(os.path.join(args.data, 'word_freq.th7')).numpy()
+word_freq = torch.load(os.path.join(args.data, 'word_freq.pt')).numpy()
 mapto = torch.from_numpy(util.reverse(np.argsort(-word_freq))).long()
 print("load word frequency mapping - complete")
 
 ntokens = len(word_freq)
 nsampled = 8192
 
-train_corpus = FastGBWDataset(args.data, 'train_data.th7', 'train_data.sid', mapto)
+train_corpus = FastGBWDataset(args.data, 'train_data.pt', 'train_data.sid', mapto, seq_length=args.bptt, batch_size=args.batch_size*args.scale)
 print("load train data - complete")
 
-test_corpus = GBWDataset(args.data, 'test_data.th7', mapto)
+test_corpus = GBWDataset(args.data, 'test_data.pt', mapto)
 print("load test data - complete")
 
 # Streaming
@@ -87,9 +91,9 @@ print("load dataset - complete")
 # Build the model
 ###############################################################################
 eval_batch_size = 1
-net = model.RNNModel(ntokens, args.emsize, args.nhid, args.emsize, args.nlayers, args.proj, args.dropout)
+net = RNNModel(ntokens, args.emsize, args.nhid, args.emsize, args.nlayers, args.proj, args.dropout)
 
-encoder = nn.Embedding(ntokens, args.emsize)
+encoder = nn.Embedding(ntokens, args.emsize, sparse=True)
 util.initialize(encoder.weight)
 
 twht = None
@@ -99,14 +103,16 @@ if args.tied:
     twht = encoder.weight
 
 D = args.emsize if args.proj else args.nhid
-ss = model.SampledSoftmax(ntokens, nsampled, D, tied_weight=twht)
+ss = SampledSoftmax(ntokens, nsampled, D, tied_weight=twht)
 
 net.add_module("encoder", encoder)
 net.add_module("decoder", ss)
 net.cuda()
 
+print("Batch Size:", args.batch_size*args.scale, "Initial LR:", args.lr*args.scale)
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adagrad(net.parameters(), args.lr, weight_decay=1e-6)
+optimizer = Adam(net.parameters(), args.lr*args.scale, betas=(0.9, 0.999))
+scheduler = LinearLR(optimizer, base_lr=args.lr*args.scale, max_iters=train_corpus.batch_num*args.epochs, last_iter=-1, min_lr=1e-8)
 
 ###############################################################################
 # Training code
@@ -147,12 +153,12 @@ def evaluate(data_source, data_gen):
     return total_loss.item() / total_word_count
 
 def train():
-    train_loader = train_corpus.batch_generator(seq_length=args.bptt, batch_size=args.batch_size)
+    train_loader = train_corpus.batch_generator()
     total_loss = 0
     total_word_count = 0
 
     start_time = time.time()
-    hidden = net.init_hidden(args.batch_size)
+    hidden = net.init_hidden(args.batch_size*args.scale)
     for batch, item in enumerate(train_loader):
         net.train()
         data, targets, word_cnt, batch_len = get_batch(item)
@@ -180,15 +186,16 @@ def train():
             torch.nn.utils.clip_grad_norm_(net.proj.parameters(), args.clip)
 
         optimizer.step()
+        scheduler.step()
 
         total_loss += word_cnt * loss.data
         total_word_count += word_cnt
 
-        interval = max(10, 1000)
+        interval = max(10, 1000//args.scale)
         if (batch % interval) == 0:
             elapsed = time.time() - start_time
-            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | loss {:5.2f} | ppl {:8.2f}'
-                  .format(epoch, batch, batch_len, args.lr, elapsed * 1000 / interval, loss.item(), math.exp(loss.item())))
+            print('Epoch: {:3d} | {:5d}/{:5d} batches | lr {:.6f} | ms/batch {:5.2f} | loss {:5.2f} | ppl {:8.2f}'
+                  .format(epoch, batch, batch_len, scheduler.lr, elapsed * 1000 / interval, loss.item(), math.exp(loss.item())))
             start_time = time.time()
             sys.stdout.flush()
 
@@ -209,10 +216,10 @@ try:
         with open(args.save, 'wb') as f:
              torch.save(net.state_dict(), f)
 
-        test_loader = test_corpus.batch_generator(seq_length=args.bptt, batch_size=eval_batch_size, shuffle=False)
+        test_loader = test_corpus.batch_generator(seq_length=1, batch_size=1, shuffle=False)
         val_loss = evaluate(test_corpus, test_loader)
         print('-' * 89)
-        print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | valid ppl {:8.2f}'
+        print('Test: {:3d} | time: {:5.2f}s | valid loss {:5.2f} | valid ppl {:8.2f}'
                .format(epoch, (time.time() - epoch_start_time), val_loss, math.exp(val_loss)))
         print('-' * 89)
         sys.stdout.flush()
@@ -222,7 +229,7 @@ except KeyboardInterrupt:
     sys.stdout.flush()
 
 # Run on test data.
-test_loader = test_corpus.batch_generator(seq_length=args.bptt, batch_size=eval_batch_size, shuffle=False)
+test_loader = test_corpus.batch_generator(seq_length=1, batch_size=1, shuffle=False)
 test_loss = evaluate(test_corpus, test_loader)
 print('=' * 89)
 print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(test_loss, math.exp(test_loss)))

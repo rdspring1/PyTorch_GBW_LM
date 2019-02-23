@@ -4,11 +4,10 @@ import pickle
 
 import numpy as np
 import torch
-from torch.utils.serialization import load_lua
 
 def build(tensor_path):
     """ Convert data (sentence id, word id) into a list of sentences """
-    tensor = load_lua(tensor_path).long()
+    tensor = torch.load(tensor_path).long()
     num_words = tensor.size()[0]
 
     print("Processing words to find sentences")
@@ -46,10 +45,10 @@ filename = sys.argv[2]
 print("Filepath:", path)
 print("Output:", filename)
 
-word_freq = load_lua(os.path.join(path, 'word_freq.th7')).numpy()
+word_freq = torch.load(os.path.join(path, 'word_freq.pt')).numpy()
 print("Loaded Tensor")
 
-data = build(os.path.join(path, 'train_data.th7'))
+data = build(os.path.join(path, 'train_data.pt'))
 print("Build Sentence ID Tensor")
 
 with open(filename, 'wb') as f:

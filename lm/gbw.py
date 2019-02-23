@@ -4,7 +4,6 @@ import random
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.serialization import load_lua
 
 class GBWDataset(Dataset):
     """Google 1-Billion Word dataset."""
@@ -21,7 +20,7 @@ class GBWDataset(Dataset):
 
     def build(self, tensor_path, mapto):
         """ Convert data (sentence id, word id) into a list of sentences """
-        tensor = load_lua(tensor_path).long()
+        tensor = torch.load(tensor_path).long()
         num_words = tensor.shape[0]
 
         data = list()
