@@ -1,7 +1,11 @@
 # PyTorch Large-Scale Language Model
-A Large-Scale PyTorch Language Model trained on the Google 1-Billion Word (GBW) dataset
+A Large-Scale PyTorch Language Model trained on the 1-Billion Word (LM1B) / (GBW) dataset
 
-# Results
+# Latest Results
+* **39.98 Perplexity** after 5 training epochs using LSTM Language Model with Adam Optimizer
+* Trained in ~26 hours using 1 Nvidia V100 GPU (**~5.1 hours per epoch**) with 2048 batch size (**~10.7 GB GPU memory**)
+
+# Previous Results
 * **46.47 Perplexity** after 5 training epochs on a 1-layer, 2048-unit, 256-projection LSTM Language Model [3]
 * Trained for 3 days using 1 Nvidia P100 GPU (**~12.5 hours per epoch**)
 * Implemented [Sampled Softmax](https://www.tensorflow.org/api_docs/python/tf/nn/sampled_softmax_loss) and 
