@@ -41,6 +41,7 @@ A Large-Scale PyTorch Language Model trained on the 1-Billion Word (LM1B) / (GBW
 1. Download Google Billion Word Dataset for Torch - [Link](http://lisaweb.iro.umontreal.ca/transfert/lisa/users/leonardn/billionwords.tar.gz)
 2. Run "process_gbw.py" on the "train_data.th7" file to create the "train_data.sid" file
 3. Install Cython framework and build Log_Uniform Sampler
+4. Convert Torch data tensors to PyTorch tensor format (Requires Pytorch v0.4.1)
 
 I leverage the GBW data preprocessed for the Torch framework. (See [Torch GBW](http://torch.ch/blog/2016/07/25/nce.html))
 Each data tensor contains all the words in data partition. The "train_data.sid" file marks the start and end positions for each independent sentence.
